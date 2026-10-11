@@ -1,0 +1,111 @@
+services:
+  db:
+    image: postgres:15
+    container_name: ${DB_CONT_NAME}
+    env_file:
+      - ./.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_HOST=${DB_HOST}
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_PORT=${DB_PORT}
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: ${PGBOUNCER_CONT_NAME}
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_HOST=${DB_HOST}
+      - POSTGRES_DB=${DB_NAME}
+      - POOL_MODE=${POOL_MODE}
+      - MAX_CLIENT_CONN=${MAX_CLIENT_CONN}
+      - DEFAULT_POOL_SIZE=${DEFAULT_POOL_SIZE}
+      - PGBOUNCER_HOST=${PGBOUNCER_HOST}
+      - LISTEN_PORT=${PGBOUNCER_PORT}
+      - AUTH_TYPE=trust
+    volumes:
+      - ./pgbouncer_userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      - db
+    ports:
+      - "${PGBOUNCER_PORT}:${PGBOUNCER_PORT}"
+
+  redis:
+    image: redis:7
+    container_name: ${REDIS_CONT_NAME}
+    env_file:
+      - ./.env
+    restart: unless-stopped
+
+  django:
+    build:
+      context: .
+      dockerfile: compose/local/django/Dockerfile
+    container_name: ${WEB_CONT_NAME}
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+      - ./static:/app/static
+      - ./media:/app/media
+    env_file:
+      - ./.env
+    environment:
+      - TZ=Europe/Moscow
+      - WITH_BOT=false
+    ports:
+      - "${DJANGO_PORT}:${DJANGO_PORT}"
+    depends_on:
+      - db
+      - pgbouncer
+      - admin
+
+  celery:
+    build:
+      context: ./
+      dockerfile: compose/common/Dockerfile
+    container_name: ${CELERY_CONT_NAME}
+    restart: unless-stopped
+    command: celery -A src worker --concurrency=10 --loglevel=INFO
+    entrypoint: [ ]
+    volumes:
+      - ./:/app
+      - ./static:/app/static
+      - ./media:/app/media
+      - ./logs:/app/logs
+    env_file:
+      - ./.env
+    depends_on:
+      - redis
+      - db
+
+  celery_beat:
+    build:
+      context: ./
+      dockerfile: compose/common/Dockerfile
+    container_name: ${BEAT_CONT_NAME}
+    restart: unless-stopped
+    command: celery -A src beat -l INFO
+    entrypoint: [ ]
+    volumes:
+      - ./:/app
+      - ./static:/app/static
+      - ./media:/app/media
+    env_file:
+      - ./.env
+    depends_on:
+      - redis
+      - pgbouncer
+
+volumes:
+  postgres_data:
+  media:
+  static:
+  logs:
